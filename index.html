@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>专业MBTI性格测试 - 深度解析版</title>
+    <!-- 引入Tailwind CSS（简化样式开发） -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入Chart.js（雷达图绘制） -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- 引入IP查询API依赖 -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    
+    <!-- 自定义样式 -->
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .scroll-smooth {
+                scroll-behavior: smooth;
+            }
+            .test-card {
+                @apply bg-white rounded-lg shadow-md p-6 mb-8 max-w-3xl mx-auto;
+            }
+            .btn-primary {
+                @apply bg-indigo-600 text-white py-3 px-6 rounded-lg hover:bg-indigo-700 transition-colors;
+            }
+            .progress-bar {
+                @apply h-2 bg-gray-200 rounded-full overflow-hidden;
+            }
+            .progress-fill {
+                @apply h-full bg-indigo-600 transition-all duration-300;
+            }
+            .question-item {
+                @apply py-6 border-b border-gray-100 last:border-0;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 scroll-smooth font-sans text-gray-800">
+    <!-- 1. 欢迎页 -->
+    <section id="welcome-page" class="min-h-screen flex flex-col items-center justify-center p-4">
+        <div class="test-card text-center">
+            <h1 class="text-3xl md:text-4xl font-bold mb-6 text-indigo-700">MBTI性格类型深度测试</h1>
+            <p class="text-gray-600 mb-8 leading-relaxed">
+                MBTI（迈尔斯-布里格斯类型指标）是目前全球最流行的性格测评工具之一，本测试包含28道专业题目，
+                覆盖E/I、S/N、T/F、J/P四大维度，将为你生成专属性格雷达图和深度解析报告。
+            </p>
+            <p class="text-red-500 mb-6 text-sm">⚠️ 同一IP地址24小时内仅可完成一次测试</p>
+            <button id="start-test" class="btn-primary text-lg">开始测试</button>
+        </div>
+    </section>
+
+    <!-- 2. 答题页（改为滚动式） -->
+    <section id="test-page" class="min-h-screen p-4 hidden">
+        <div class="test-card">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold">MBTI性格测试</h2>
+                <span id="progress-text" class="text-gray-500">0/28</span>
+            </div>
+            <div class="progress-bar mb-8">
+                <div id="progress-fill" class="progress-fill w-0"></div>
+            </div>
+            
+            <!-- 题目容器（可滚动） -->
+            <div id="question-container" class="mb-8 max-h-[70vh] overflow-y-auto pr-2"></div>
+            
+            <!-- 提交按钮（替代上一题/下一题） -->
+            <div class="flex justify-center">
+                <button id="submit-test" class="btn-primary bg-gray-400 cursor-not-allowed" disabled>提交测试</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- 3. 结果页 -->
+    <section id="result-page" class="min-h-screen p-4 hidden">
+        <div class="test-card">
+            <h2 class="text-2xl font-bold mb-6 text-center">你的MBTI性格测试结果</h2>
+            
+            <!-- 雷达图容器 -->
+            <div class="mb-8 h-80">
+                <canvas id="mbti-radar-chart"></canvas>
+            </div>
+            
+            <!-- 核心结果 -->
+            <div class="bg-indigo-50 rounded-lg p-4 mb-8 text-center">
+                <h3 id="mbti-type" class="text-xl font-bold mb-2">INFJ - 提倡者</h3>
+                <p id="mbti-summary" class="text-gray-700">你的性格核心特质：富有洞察力、理想主义、富有创造力...</p>
+            </div>
+            
+            <!-- 深度解析 -->
+            <div id="mbti-detail" class="mb-8 leading-relaxed">
+                <!-- 解析内容将动态生成 -->
+            </div>
+            
+            <!-- 重新测试按钮（受IP限制） -->
+            <button id="restart-test" class="btn-primary w-full">重新测试</button>
+        </div>
+    </section>
+
+    <script>
+        // ===================== 核心配置 =====================
+        // 1. MBTI测试题目（28题，覆盖4个维度）
+        const questions = [
+            // E/I维度（外向/内向）- 1-7题
+            { id: 1, text: "在社交场合中，你更倾向于？", options: [
+                { text: "主动结识新朋友，感到精力充沛", score: { E: 5, I: 0 } },
+                { text: "和熟悉的人交流，避免过度社交", score: { E: 0, I: 5 } },
+                { text: "介于两者之间，看状态", score: { E: 2.5, I: 2.5 } }
+            ]},
+            { id: 2, text: "休息时，你更喜欢？", options: [
+                { text: "和朋友聚会/外出活动", score: { E: 5, I: 0 } },
+                { text: "独处看书/追剧/思考", score: { E: 0, I: 5 } },
+                { text: "偶尔聚会，偶尔独处", score: { E: 2.5, I: 2.5 } }
+            ]},
+            { id: 3, text: "遇到压力时，你会？", options: [
+                { text: "找人倾诉，获得情感支持", score: { E: 5, I: 0 } },
+                { text: "自我消化，冷静思考解决方案", score: { E: 0, I: 5 } },
+                { text: "先独处，再找信任的人聊聊", score: { E: 2.5, I: 2.5 } }
+            ]},
+            { id: 4, text: "你更享受哪种沟通方式？", options: [
+                { text: "面对面交流，实时互动", score: { E: 5, I: 0 } },
+                { text: "文字沟通，有时间思考回复", score: { E: 0, I: 5 } },
+                { text: "视情况而定，都可以", score: { E: 2.5, I: 2.5 } }
+            ]},
+            { id: 5, text: "参加大型活动后，你通常会？", options: [
+                { text: "感到兴奋，还想继续参与", score: { E: 5, I: 0 } },
+                { text: "感到疲惫，需要独处恢复", score: { E: 0, I: 5 } },
+                { text: "有点累，但总体开心", score: { E: 2.5, I: 2.5 } }
+            ]},
+            { id: 6, text: "你更倾向于成为？", options: [
+                { text: "人群中的焦点，带动气氛", score: { E: 5, I: 0 } },
+                { text: "安静的观察者，默默关注", score: { E: 0, I: 5 } },
+                { text: "偶尔参与，偶尔观察", score: { E: 2.5, I: 2.5 } }
+            ]},
+            { id: 7, text: "制定计划时，你会？", options: [
+                { text: "和他人讨论，收集意见", score: { E: 5, I: 0 } },
+                { text: "先自己思考，再分享结果", score: { E: 0, I: 5 } },
+                { text: "先独立思考，再少量讨论", score: { E: 2.5, I: 2.5 } }
+            ]},
+
+            // S/N维度（感觉/直觉）- 8-14题
+            { id: 8, text: "你更关注？", options: [
+                { text: "具体的事实和细节", score: { S: 5, N: 0 } },
+                { text: "抽象的概念和可能性", score: { S: 0, N: 5 } },
+                { text: "既关注细节也关注趋势", score: { S: 2.5, N: 2.5 } }
+            ]},
+            { id: 9, text: "学习新技能时，你更倾向于？", options: [
+                { text: "先动手实践，从经验中学习", score: { S: 5, N: 0 } },
+                { text: "先理解原理，再尝试实践", score: { S: 0, N: 5 } },
+                { text: "理论结合实践，同步进行", score: { S: 2.5, N: 2.5 } }
+            ]},
+            { id: 10, text: "你对未来的看法是？", options: [
+                { text: "基于过去的经验预测", score: { S: 5, N: 0 } },
+                { text: "基于想象和可能性规划", score: { S: 0, N: 5 } },
+                { text: "参考经验，也保留想象空间", score: { S: 2.5, N: 2.5 } }
+            ]},
+            { id: 11, text: "你更容易记住？", options: [
+                { text: "具体的事件和数据", score: { S: 5, N: 0 } },
+                { text: "整体的印象和想法", score: { S: 0, N: 5 } },
+                { text: "重要数据和核心想法", score: { S: 2.5, N: 2.5 } }
+            ]},
+            { id: 12, text: "你更欣赏哪种解决问题的方式？", options: [
+                { text: "实用、可落地的方案", score: { S: 5, N: 0 } },
+                { text: "创新、有前瞻性的方案", score: { S: 0, N: 5 } },
+                { text: "实用且有创新的平衡", score: { S: 2.5, N: 2.5 } }
+            ]},
+            { id: 13, text: "阅读时，你更喜欢？", options: [
+                { text: "纪实类、实用类书籍", score: { S: 5, N: 0 } },
+                { text: "科幻、哲学类书籍", score: { S: 0, N: 5 } },
+                { text: "各类书籍都有涉猎", score: { S: 2.5, N: 2.5 } }
+            ]},
+            { id: 14, text: "你对“改变”的态度是？", options: [
+                { text: "谨慎对待，先看实际效果", score: { S: 5, N: 0 } },
+                { text: "积极拥抱，探索新可能", score: { S: 0, N: 5 } },
+                { text: "适度改变，稳步推进", score: { S: 2.5, N: 2.5 } }
+            ]},
+
+            // T/F维度（思考/情感）- 15-21题
+            { id: 15, text: "做决策时，你更看重？", options: [
+                { text: "逻辑和客观事实", score: { T: 5, F: 0 } },
+                { text: "情感和他人感受", score: { T: 0, F: 5 } },
+                { text: "兼顾逻辑和情感", score: { T: 2.5, F: 2.5 } }
+            ]},
+            { id: 16, text: "面对批评，你会？", options: [
+                { text: "理性分析，关注改进点", score: { T: 5, F: 0 } },
+                { text: "先感受情绪，再处理问题", score: { T: 0, F: 5 } },
+                { text: "先平复情绪，再理性分析", score: { T: 2.5, F: 2.5 } }
+            ]},
+            { id: 17, text: "你更倾向于？", options: [
+                { text: "公正公平，一视同仁", score: { T: 5, F: 0 } },
+                { text: "因人而异，灵活处理", score: { T: 0, F: 5 } },
+                { text: "原则性和灵活性结合", score: { T: 2.5, F: 2.5 } }
+            ]},
+            { id: 18, text: "团队合作中，你更关注？", options: [
+                { text: "目标达成和效率", score: { T: 5, F: 0 } },
+                { text: "团队氛围和成员感受", score: { T: 0, F: 5 } },
+                { text: "效率和氛围兼顾", score: { T: 2.5, F: 2.5 } }
+            ]},
+            { id: 19, text: "解决冲突时，你会？", options: [
+                { text: "直接指出问题，寻求解决方案", score: { T: 5, F: 0 } },
+                { text: "先缓解情绪，再解决问题", score: { T: 0, F: 5 } },
+                { text: "先共情，再理性沟通", score: { T: 2.5, F: 2.5 } }
+            ]},
+            { id: 20, text: "你认为成功的关键是？", options: [
+                { text: "能力和努力", score: { T: 5, F: 0 } },
+                { text: "人际关系和情感连接", score: { T: 0, F: 5 } },
+                { text: "能力和人际并重", score: { T: 2.5, F: 2.5 } }
+            ]},
+            { id: 21, text: "选择职业时，你更看重？", options: [
+                { text: "发展前景和薪资", score: { T: 5, F: 0 } },
+                { text: "兴趣和工作幸福感", score: { T: 0, F: 5 } },
+                { text: "前景和幸福感平衡", score: { T: 2.5, F: 2.5 } }
+            ]},
+
+            // J/P维度（判断/知觉）- 22-28题
+            { id: 22, text: "你对生活的态度是？", options: [
+                { text: "喜欢计划，按部就班", score: { J: 5, P: 0 } },
+                { text: "喜欢灵活，随机应变", score: { J: 0, P: 5 } },
+                { text: "有大致计划，留灵活空间", score: { J: 2.5, P: 2.5 } }
+            ]},
+            { id: 23, text: "截止日期前，你通常会？", options: [
+                { text: "提前完成，留出检查时间", score: { J: 5, P: 0 } },
+                { text: "最后冲刺，效率更高", score: { J: 0, P: 5 } },
+                { text: "提前开始，截止前完成", score: { J: 2.5, P: 2.5 } }
+            ]},
+            { id: 24, text: "你更喜欢哪种生活状态？", options: [
+                { text: "稳定、有规律", score: { J: 5, P: 0 } },
+                { text: "多变、有惊喜", score: { J: 0, P: 5 } },
+                { text: "有基本规律，偶尔变化", score: { J: 2.5, P: 2.5 } }
+            ]},
+            { id: 25, text: "做选择时，你会？", options: [
+                { text: "尽快决定，避免拖延", score: { J: 5, P: 0 } },
+                { text: "多比较，直到最后一刻", score: { J: 0, P: 5 } },
+                { text: "收集足够信息后及时决定", score: { J: 2.5, P: 2.5 } }
+            ]},
+            { id: 26, text: "旅行时，你会？", options: [
+                { text: "详细规划行程和景点", score: { J: 5, P: 0 } },
+                { text: "随意走走，发现惊喜", score: { J: 0, P: 5 } },
+                { text: "定大致方向，灵活调整", score: { J: 2.5, P: 2.5 } }
+            ]},
+            { id: 27, text: "工作环境中，你更喜欢？", options: [
+                { text: "结构化、有明确流程", score: { J: 5, P: 0 } },
+                { text: "宽松、有自主空间", score: { J: 0, P: 5 } },
+                { text: "有基本框架，允许灵活操作", score: { J: 2.5, P: 2.5 } }
+            ]},
+            { id: 28, text: "完成任务后，你会？", options: [
+                { text: "立即开始下一个任务", score: { J: 5, P: 0 } },
+                { text: "先放松，再规划下一个", score: { J: 0, P: 5 } },
+                { text: "短暂休息后开始新任务", score: { J: 2.5, P: 2.5 } }
+            ]}
+        ];
+
+        // 2. MBTI类型解析库（深度解析）
+        const mbtiAnalysis = {
+            INFJ: {
+                name: "提倡者",
+                summary: "富有洞察力、理想主义、富有创造力，善于理解他人的内心世界，追求有意义的生活和工作。",
+                detail: `
+                    <h4 class="font-bold mb-2">核心特质</h4>
+                    <p>INFJ是最稀有的性格类型之一，仅占人口的1-2%。你拥有敏锐的直觉和深刻的同理心，能够轻易洞察他人的动机和需求。你追求内在的意义和价值，不满足于表面的敷衍，渴望创造真正有价值的事物。</p>
+                    <h4 class="font-bold mb-2 mt-4">优势</h4>
+                    <ul class="list-disc pl-5 mb-2">
+                        <li>极强的同理心和洞察力，善于理解他人</li>
+                        <li>富有创造力和想象力，能看到事物的可能性</li>
+                        <li>坚持原则，追求正义和公平</li>
+                        <li>善于长期规划，有强烈的目标感</li>
+                    </ul>
+                    <h4 class="font-bold mb-2 mt-4">潜在挑战</h4>
+                    <ul class="list-disc pl-5 mb-2">
+                        <li>容易过度思考，陷入内耗</li>
+                        <li>对自己和他人要求过高，容易失望</li>
+                        <li>不善于拒绝他人，容易过度付出</li>
+                        <li>在现实细节处理上可能不够关注</li>
+                    </ul>
+                    <h4 class="font-bold mb-2 mt-4">适合职业</h4>
+                    <p>心理咨询师、作家、设计师、教育工作者、公益组织负责人、人力资源管理、艺术创作等。</p>
+                    <h4 class="font-bold mb-2 mt-4">人际相处建议</h4>
+                    <p>学会设定边界，避免过度付出；多关注现实细节，平衡理想与现实；适当表达自己的需求，不要总是优先考虑他人。</p>
+                `
+            },
+            INTJ: {
+                name: "建筑师",
+                summary: "富有战略眼光、理性果断、追求完美，是天生的规划者和问题解决者，善于构建复杂的系统和方案。",
+                detail: `
+                    <h4 class="font-bold mb-2">核心特质</h4>
+                    <p>INTJ是富有战略思维的规划者，占人口的2%左右。你拥有强大的逻辑思维和分析能力，能够快速把握复杂问题的核心，制定长远的战略规划。你追求效率和完美，不满足于平庸的解决方案。</p>
+                    <h4 class="font-bold mb-2 mt-4">优势</h4>
+                    <ul class="list-disc pl-5 mb-2">
+                        <li>极强的逻辑分析和问题解决能力</li>
+                        <li>长远的战略眼光和规划能力</li>
+                        <li>独立思考，不盲从权威</li>
+                        <li>高度的自律和目标导向</li>
+                    </ul>
+                    <h4 class="font-bold mb-2 mt-4">潜在挑战</h4>
+                    <ul class="list-disc pl-5 mb-2">
+                        <li>对他人的能力缺乏耐心，显得高冷</li>
+                        <li>过度关注理性，忽略情感需求</li>
+                        <li>完美主义倾向，容易拖延</li>
+                        <li>不善于表达情感，人际沟通不足</li>
+                    </ul>
+                    <h4 class="font-bold mb-2 mt-4">适合职业</h4>
+                    <p>企业高管、工程师、科学家、律师、金融分析师、技术总监、战略顾问等。</p>
+                    <h4 class="font-bold mb-2 mt-4">人际相处建议</h4>
+                    <p>学会欣赏他人的不同之处，耐心倾听；关注他人的情感需求，适当表达共情；平衡完美主义，接受“足够好”的解决方案。</p>
+                `
+            },
+            INFP: {
+                name: "调停者",
+                summary: "理想主义、富有同情心、创造力丰富，追求内心的真实和美好，善于用独特的视角理解世界。",
+                detail: `
+                    <h4 class="font-bold mb-2">核心特质</h4>
+                    <p>INFP是富有理想主义的调停者，占人口的4%左右。你拥有丰富的内心世界和强烈的价值观，追求真实和意义，反感虚伪和功利。你善于共情，能够理解他人的情感和需求，渴望创造和谐的环境。</p>
+                    <h4 class="font-bold mb-2 mt-4">优势</h4>
+                    <ul class="list-disc pl-5 mb-2">
+                        <li>极强的共情能力和同理心</li>
+                        <li>丰富的想象力和创造力</li>
+                        <li>坚持内心的价值观，不随波逐流</li>
+                        <li>善于发现他人的优点和潜力</li>
+                    </ul>
+                    <h4 class="font-bold mb-2 mt-4">潜在挑战</h4>
+                    <ul class="list-disc pl-5 mb-2">
+                        <li>容易逃避冲突，避免面对现实</li>
+                        <li>过度理想化，容易失望</li>
+                        <li>不善于处理实际事务和细节</li>
+                        <li>容易被他人的情绪影响</li>
+                    </ul>
+                    <h4 class="font-bold mb-2 mt-4">适合职业</h4>
+                    <p>作家、艺术家、心理咨询师、编辑、教育工作者、公益工作者、设计师等。</p>
+                    <h4 class="font-bold mb-2 mt-4">人际相处建议</h4>
+                    <p>学会直面冲突，表达自己的真实想法；平衡理想与现实，接受不完美；设定清晰的边界，保护自己的情绪。</p>
+                `
+            },
+            INTP: {
+                name: "逻辑学家",
+                summary: "富有好奇心、理性分析、思维敏捷，是天生的思考者，善于探索抽象概念和解决复杂问题。",
+                detail: `
+                    <h4 class="font-bold mb-2">核心特质</h4>
+                    <p>INTP是富有好奇心的逻辑学家，占人口的3%左右。你拥有敏锐的逻辑思维和强烈的求知欲，喜欢探索抽象概念和理论，善于发现事物的本质规律。你追求知识和真理，不满足于表面的答案。</p>
+                    <h4 class="font-bold mb-2 mt-4">优势</h4>
+                    <ul class="list-disc pl-5 mb-2">
+                        <li>极强的逻辑分析和抽象思维能力</li>
+                        <li>好奇心强，善于学习和探索新知识</li>
+                        <li>客观公正，不受情感影响</li>
+                        <li>善于发现问题和创新解决方案</li>
+                    </ul>
+                    <h4 class="font-bold mb-2 mt-4">潜在挑战</h4>
+                    <ul class="list-disc pl-5 mb-2">
+                        <li>容易过度思考，缺乏行动力</li>
+                        <li>不善于处理情感和人际问题</li>
+                        <li>对日常琐事缺乏耐心</li>
+                        <li>容易忽略现实细节，活在自己的思维世界</li>
+                    </ul>
+                    <h4 class="font-bold mb-2 mt-4">适合职业</h4>
+                    <p>科学家、程序员、哲学家、研究员、分析师、工程师、学术研究者等。</p>
+                    <h4 class="font-bold mb-2 mt-4">人际相处建议</h4>
+                    <p>学会关注他人的情感需求，适当表达共情；平衡思考和行动，将想法落地；关注现实细节，融入日常生活。</p>
+                `
+            },
+            // 其余12种类型解析（篇幅限制仅展示4种，可按需扩展）
+            ENFJ: { name: "教育家", summary: "热情外向、善于沟通、富有感染力，天生的领导者和教育者，善于激励他人成长。", detail: "<p>ENFJ是富有魅力的教育家，占人口的2%左右。你拥有强烈的同理心和沟通能力，善于理解他人的需求和潜力，能够激励和引导他人实现目标。你追求和谐的人际关系，渴望为他人和社会创造价值。</p>" },
+            ENTP: { name: "辩论家", summary: "思维敏捷、富有创意、善于辩论，天生的创新者和问题解决者，喜欢挑战传统和权威。", detail: "<p>ENTP是富有活力的辩论家，占人口的3%左右。你拥有敏捷的思维和强烈的好奇心，善于发现问题和创新解决方案，喜欢挑战和辩论，不畏惧权威。你追求智力上的刺激和创新。</p>" },
+            ENFP: { name: "竞选者", summary: "热情乐观、富有创造力、善于社交，天生的梦想家，善于发现可能性和激励他人。", detail: "<p>ENFP是富有热情的竞选者，占人口的8%左右。你拥有丰富的想象力和强烈的好奇心，善于发现事物的可能性，喜欢与人交往，能够激励和感染他人。你追求快乐和意义，反感单调和束缚。</p>" },
+            ENTJ: { name: "指挥官", summary: "果断自信、善于决策、目标导向，天生的领导者，善于制定战略和推动执行。", detail: "<p>ENTJ是天生的指挥官，占人口的2%左右。你拥有强大的逻辑思维和决策能力，善于制定战略和推动执行，追求效率和结果，不畏惧挑战和压力。你是天生的领导者和组织者。</p>" },
+            ISFJ: { name: "守卫者", summary: "细心体贴、责任感强、务实可靠，善于照顾他人，是团队中的稳定力量。", detail: "<p>ISFJ是可靠的守卫者，占人口的13%左右。你拥有强烈的责任感和同理心，善于照顾他人的需求，注重细节和实际，追求稳定和和谐。你是团队中的可靠支持者。</p>" },
+            ISFP: { name: "探险家", summary: "温和敏感、富有艺术气息、热爱自由，善于体验生活，追求真实和美好。", detail: "<p>ISFP是富有艺术气息的探险家，占人口的8%左右。你拥有敏锐的感官和强烈的审美能力，善于体验和感受生活，追求自由和真实，反感束缚和虚伪。</p>" },
+            ISTJ: { name: "物流师", summary: "务实可靠、责任感强、注重规则，善于组织和管理，是团队中的稳定基石。", detail: "<p>ISTJ是可靠的物流师，占人口的13%左右。你拥有强烈的责任感和务实精神，善于组织和管理，注重规则和秩序，追求稳定和效率。你是团队中的可靠执行者。</p>" },
+            ISTP: { name: "鉴赏家", summary: "冷静务实、动手能力强、善于分析，天生的问题解决者，喜欢探索和实践。", detail: "<p>ISTP是冷静的鉴赏家，占人口的5%左右。你拥有强大的动手能力和分析能力，善于解决实际问题，喜欢探索和实践，追求实用和效率。</p>" },
+            ESFJ: { name: "执政官", summary: "热情外向、善于社交、注重他人感受，天生的社交家，善于营造和谐的氛围。", detail: "<p>ESFJ是热情的执政官，占人口的12%左右。你拥有强烈的同理心和社交能力，善于照顾他人的需求，注重人际关系和传统，追求和谐和认可。</p>" },
+            ESFP: { name: "表演者", summary: "热情外向、善于表达、热爱生活，天生的表演者，善于创造快乐和氛围。", detail: "<p>ESFP是热情的表演者，占人口的9%左右。你拥有强烈的生活热情和表达能力，善于创造快乐和氛围，喜欢体验和感受生活，追求即时的快乐和满足。</p>" },
+            ESTJ: { name: "总经理", summary: "果断务实、善于组织、注重效率，天生的管理者，善于制定规则和推动执行。", detail: "<p>ESTJ是果断的总经理，占人口的8%左右。你拥有强烈的责任感和组织能力，善于制定规则和推动执行，注重效率和结果，追求稳定和秩序。</p>" },
+            ESTP: { name: "企业家", summary: "务实果断、善于行动、热爱挑战，天生的行动派，善于抓住机会和解决问题。", detail: "<p>ESTP是果断的企业家，占人口的4%左右。你拥有强烈的行动力和应变能力，善于抓住机会和解决实际问题，喜欢挑战和冒险，追求刺激和成功。</p>" }
+        };
+
+        // ===================== 核心逻辑 =====================
+        // 全局变量
+        let userScores = { E: 0, I: 0, S: 0, N: 0, T: 0, F: 0, J: 0, P: 0 }; // 用户得分
+        let userIP = ""; // 用户IP
+        const TEST_LIMIT_HOURS = 24; // 测试限制时间（小时）
+
+        // 1. IP限制逻辑
+        async function initIPLimit() {
+            try {
+                // 获取用户公网IP
+                const ipResponse = await axios.get("https://api.ipify.org?format=json");
+                userIP = ipResponse.data.ip;
+                
+                // 检查本地存储中的测试记录
+                const testRecord = JSON.parse(localStorage.getItem(`mbti_test_${userIP}`) || "null");
+                if (testRecord) {
+                    const lastTestTime = new Date(testRecord.time);
+                    const now = new Date();
+                    const hoursPassed = (now - lastTestTime) / (1000 * 60 * 60);
+                    
+                    // 24小时内已测试过
+                    if (hoursPassed < TEST_LIMIT_HOURS) {
+                        alert(`你已在${lastTestTime.toLocaleString()}完成过测试，24小时内仅可测试一次！`);
+                        document.getElementById("start-test").disabled = true;
+                        document.getElementById("start-test").classList.add("bg-gray-400", "cursor-not-allowed");
+                    }
+                }
+            } catch (error) {
+                console.error("IP获取失败：", error);
+                alert("IP检测失败，可能影响测试限制功能，但可正常答题");
+            }
+        }
+
+        // 2. 页面切换逻辑
+        function showPage(pageId) {
+            // 隐藏所有页面
+            document.getElementById("welcome-page").classList.add("hidden");
+            document.getElementById("test-page").classList.add("hidden");
+            document.getElementById("result-page").classList.add("hidden");
+            
+            // 显示目标页面
+            document.getElementById(pageId).classList.remove("hidden");
+            
+            // 滚动到顶部
+            window.scrollTo(0, 0);
+        }
+
+        // 3. 渲染所有题目（核心修改：从单题渲染改为批量渲染）
+        function renderAllQuestions() {
+            const container = document.getElementById("question-container");
+            container.innerHTML = ""; // 清空容器
+            
+            // 遍历所有题目，逐个渲染
+            questions.forEach(question => {
+                // 创建题目项容器
+                const questionItem = document.createElement("div");
+                questionItem.className = "question-item";
+                
+                // 创建题目文本
+                const questionText = document.createElement("h3");
+                questionText.className = "text-xl font-medium mb-4";
+                questionText.textContent = `${question.id}. ${question.text}`;
+                questionItem.appendChild(questionText);
+                
+                // 创建选项容器
+                const optionsContainer = document.createElement("div");
+                optionsContainer.className = "space-y-3";
+                
+                // 渲染选项
+                question.options.forEach((option, index) => {
+                    const optionLabel = document.createElement("label");
+                    optionLabel.className = "flex items-center p-3 border rounded-lg hover:bg-gray-50 cursor-pointer";
+                    optionLabel.innerHTML = `
+                        <input type="radio" name="q_${question.id}" value="${index}" class="mr-3" 
+                            ${localStorage.getItem(`q_${question.id}`) == index ? "checked" : ""}>
+                        <span>${option.text}</span>
+                    `;
+                    
+                    // 为单选框绑定change事件，实时保存答案
+                    const radioInput = optionLabel.querySelector("input");
+                    radioInput.addEventListener("change", () => {
+                        saveAnswer(question.id, index);
+                        updateProgress(); // 每次答题后更新进度
+                    });
+                    
+                    optionsContainer.appendChild(optionLabel);
+                });
+                
+                questionItem.appendChild(optionsContainer);
+                container.appendChild(questionItem);
+            });
+            
+            // 初始化进度
+            updateProgress();
+        }
+
+        // 4. 保存单题答案（核心修改：独立的答案保存函数）
+        function saveAnswer(questionId, optionIndex) {
+            const question = questions.find(q => q.id === questionId);
+            if (!question) return;
+            
+            const option = question.options[optionIndex];
+            // 保存答案到本地存储
+            localStorage.setItem(`q_${questionId}`, optionIndex);
+        }
+
+        // 5. 更新进度条和进度文本（核心修改：按已答题数计算进度）
+        function updateProgress() {
+            const progressText = document.getElementById("progress-text");
+            const progressFill = document.getElementById("progress-fill");
+            const submitBtn = document.getElementById("submit-test");
+            
+            // 统计已答题数量
+            let answeredCount = 0;
+            questions.forEach(question => {
+                if (localStorage.getItem(`q_${question.id}`) !== null) {
+                    answeredCount++;
+                }
+            });
+            
+            // 更新进度文本
+            progressText.textContent = `${answeredCount}/${questions.length}`;
+            
+            // 更新进度条
+            const progressPercent = (answeredCount / questions.length) * 100;
+            progressFill.style.width = `${progressPercent}%`;
+            
+            // 所有题都答完后启用提交按钮
+            if (answeredCount === questions.length) {
+                submitBtn.disabled = false;
+                submitBtn.classList.remove("bg-gray-400", "cursor-not-allowed");
+            } else {
+                submitBtn.disabled = true;
+                submitBtn.classList.add("bg-gray-400", "cursor-not-allowed");
+            }
+        }
+
+        // 6. 计算MBTI类型（保留原有逻辑）
+        function calculateMBTI() {
+            // 重置得分
+            userScores = { E: 0, I: 0, S: 0, N: 0, T: 0, F: 0, J: 0, P: 0 };
+            
+            // 累加所有题目得分
+            questions.forEach(question => {
+                const optionIndex = localStorage.getItem(`q_${question.id}`);
+                if (optionIndex !== null) {
+                    const option = question.options[optionIndex];
+                    for (const [dimension, score] of Object.entries(option.score)) {
+                        userScores[dimension] += score;
+                    }
+                }
+            });
+            
+            // 确定每个维度的倾向
+            const EorI = userScores.E > userScores.I ? "E" : "I";
+            const SorN = userScores.S > userScores.N ? "S" : "N";
+            const TorF = userScores.T > userScores.F ? "T" : "F";
+            const JorP = userScores.J > userScores.P ? "J" : "P";
+            
+            return EorI + SorN + TorF + JorP;
+        }
+
+        // 7. 生成雷达图（保留原有逻辑）
+        function renderRadarChart(mbtiType) {
+            const ctx = document.getElementById("mbti-radar-chart").getContext("2d");
+            
+            // 准备雷达图数据（归一化到0-100）
+            const maxScore = 35; // 每个维度的最大得分（7题×5分）
+            const data = {
+                labels: ['外向(E)', '感觉(S)', '思考(T)', '判断(J)', '知觉(P)', '情感(F)', '直觉(N)', '内向(I)'],
+                datasets: [{
+                    label: '你的性格维度得分',
+                    data: [
+                        (userScores.E / maxScore) * 100,
+                        (userScores.S / maxScore) * 100,
+                        (userScores.T / maxScore) * 100,
+                        (userScores.J / maxScore) * 100,
+                        (userScores.P / maxScore) * 100,
+                        (userScores.F / maxScore) * 100,
+                        (userScores.N / maxScore) * 100,
+                        (userScores.I / maxScore) * 100
+                    ],
+                    backgroundColor: 'rgba(79, 70, 229, 0.2)',
+                    borderColor: 'rgba(79, 70, 229, 1)',
+                    borderWidth: 2,
+                    pointBackgroundColor: 'rgba(79, 70, 229, 1)'
+                }]
+            };
+            
+            // 销毁已有图表（避免重复渲染）
+            if (window.mbtiChart) {
+                window.mbtiChart.destroy();
+            }
+            
+            // 创建雷达图
+            window.mbtiChart = new Chart(ctx, {
+                type: 'radar',
+                data: data,
+                options: {
+                    scales: {
+                        r: {
+                            beginAtZero: true,
+                            max: 100,
+                            ticks: {
+                                stepSize: 20
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    },
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            });
+        }
+
+        // 8. 渲染结果页面（保留原有逻辑）
+        function renderResult() {
+            // 计算MBTI类型
+            const mbtiType = calculateMBTI();
+            
+            // 获取解析数据
+            const analysis = mbtiAnalysis[mbtiType] || {
+                name: "未知类型",
+                summary: "暂无详细解析",
+                detail: "<p>该类型的详细解析正在完善中。</p>"
+            };
+            
+            // 更新页面内容
+            document.getElementById("mbti-type").textContent = `${mbtiType} - ${analysis.name}`;
+            document.getElementById("mbti-summary").textContent = analysis.summary;
+            document.getElementById("mbti-detail").innerHTML = analysis.detail;
+            
+            // 生成雷达图
+            renderRadarChart(mbtiType);
+            
+            // 记录测试时间（IP限制）
+            if (userIP) {
+                localStorage.setItem(`mbti_test_${userIP}`, JSON.stringify({
+                    time: new Date().toISOString(),
+                    type: mbtiType
+                }));
+            }
+        }
+
+        // ===================== 事件绑定 =====================
+        // 初始化IP限制
+        initIPLimit();
+
+        // 开始测试按钮
+        document.getElementById("start-test").addEventListener("click", () => {
+            showPage("test-page");
+            renderAllQuestions(); // 渲染所有题目
+        });
+
+        // 提交测试按钮（新增：替代下一题按钮的最终提交）
+        document.getElementById("submit-test").addEventListener("click", () => {
+            showPage("result-page");
+            renderResult();
+        });
+
+        // 重新测试按钮（修改：清除所有答题记录）
+        document.getElementById("restart-test").addEventListener("click", () => {
+            // 检查IP限制
+            const testRecord = JSON.parse(localStorage.getItem(`mbti_test_${userIP}`) || "null");
+            if (testRecord) {
+                const lastTestTime = new Date(testRecord.time);
+                const now = new Date();
+                const hoursPassed = (now - lastTestTime) / (1000 * 60 * 60);
+                
+                if (hoursPassed < TEST_LIMIT_HOURS) {
+                    alert(`距离上次测试不足24小时，请${Math.ceil(TEST_LIMIT_HOURS - hoursPassed)}小时后再试！`);
+                    return;
+                }
+            }
+            
+            // 清除所有答题记录
+            questions.forEach(question => {
+                localStorage.removeItem(`q_${question.id}`);
+            });
+            
+            // 重置状态
+            userScores = { E: 0, I: 0, S: 0, N: 0, T: 0, F: 0, J: 0, P: 0 };
+            
+            // 跳转到答题页并重新渲染题目
+            showPage("test-page");
+            renderAllQuestions();
+        });
+    </script>
+</body>
+</html>
